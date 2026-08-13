@@ -80,10 +80,10 @@ impl Args {
                     "x" => last = Some('x'),
                     "y" => last = Some('y'),
 
-                    "fullscreen" => args.fullscreen = true,
-                    "resizable" => args.resizable = true,
-                    "decorations" => args.decorations = true,
-                    "transparent" => args.transparent = true,
+                    "fullscreen" => args.fullscreen = !args.fullscreen,
+                    "resizable" => args.resizable = !args.resizable,
+                    "decorations" => args.decorations = !args.decorations,
+                    "transparent" => args.transparent = !args.transparent,
 
                     "help" => {
                         println!("{HELP}");
@@ -101,10 +101,10 @@ impl Args {
                 for c in flags.chars() {
                     match c {
                         't' | 'w' | 'h' | 'x' | 'y' => last = Some(c),
-                        'f' => args.fullscreen = true,
-                        'r' => args.resizable = true,
-                        'd' => args.decorations = true,
-                        'T' => args.transparent = true,
+                        'f' => args.fullscreen = !args.fullscreen,
+                        'r' => args.resizable = !args.resizable,
+                        'd' => args.decorations = !args.decorations,
+                        'T' => args.transparent = !args.transparent,
 
                         'H' => {
                             println!("{HELP}");
@@ -168,7 +168,9 @@ impl Args {
                 Some(Fullscreen::Borderless(None))
             } else {
                 None
-            });
+            })
+            // min window size
+            .with_min_inner_size(LogicalSize::new(1, 1));
 
         if let (Some(x), Some(y)) = (self.x, self.y) {
             attributes = attributes.with_position(LogicalPosition::new(x, y));
