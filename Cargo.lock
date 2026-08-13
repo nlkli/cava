@@ -230,6 +230,7 @@ name = "cava"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrayvec",
  "pollster",
  "vello",
  "winit",

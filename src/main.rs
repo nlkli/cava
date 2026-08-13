@@ -1,7 +1,8 @@
 use vello::kurbo::Size;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::Key;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use vello::peniko::color::palette;
@@ -9,14 +10,18 @@ use vello::util::{RenderContext, RenderSurface};
 use vello::wgpu::CurrentSurfaceTexture;
 use vello::{AaConfig, Renderer, RendererOptions, Scene, kurbo, wgpu};
 
+use vello::kurbo::{
+    Affine, BezPath, Circle, CircleSegment, CubicBez, Ellipse, Line, Point, QuadBez, Rect,
+    RoundedRect, Triangle, Vec2,
+};
+
 use std::sync::Arc;
 
 mod camera;
 mod cli;
-mod document;
+mod el;
 
 use camera::Camera;
-use document::Document;
 
 enum RenderState {
     Suspended(Option<Arc<Window>>),
@@ -33,7 +38,7 @@ struct App {
     rstate: RenderState,
     scene: Scene,
     camera: Camera,
-    document: Document,
+    els: Vec<el::El>,
 }
 
 impl ApplicationHandler for App {
@@ -94,25 +99,30 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => {
                 if size.width != 0 && size.height != 0 {
                     self.rctx.resize_surface(surface, size.width, size.height);
-                    self.camera.viewport = Size::new(size.width as f64, size.height as f64);
+                    self.camera.state_mut().viewport =
+                        Size::new(size.width as f64, size.height as f64);
                     window.request_redraw();
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                match event.logical_key.as_ref() {
+                    Key::Character(char) => {
+                        match char {
+                            "j" => self.camera.state_mut().zoom += 0.2,
+                            "k" => self.camera.state_mut().zoom -= 0.2,
+                            "h" => self.camera.state_mut().position.x += 2.1,
+                            "l" => self.camera.state_mut().position.x -= 2.1,
+                            _ => {}
+                        }
+                        window.request_redraw();
+                    }
+                    _ => {}
                 }
             }
             WindowEvent::RedrawRequested => {
                 self.scene.reset();
 
-                // add_shapes_to_scene(&mut self.scene);
-                self.document.render(&mut self.scene, &self.camera);
-
-                let stroke = kurbo::Stroke::new(6.0);
-                let rect = kurbo::Rect::new(10.0, 10.0, 240.0, 240.0);
-                self.scene.stroke(
-                    &stroke,
-                    kurbo::Affine::IDENTITY,
-                    palette::css::AQUA,
-                    None,
-                    &rect,
-                );
+                self.camera.render(&mut self.scene, &self.els);
 
                 let width = surface.config.width;
                 let height = surface.config.height;
@@ -189,14 +199,96 @@ fn main() {
         rstate: RenderState::Suspended(None),
         scene: Scene::new(),
         camera: Camera::new(Size::new(args.width as f64, args.height as f64)),
-        document: Document::new(),
+        els: Vec::new(),
     };
 
-    let el = document::ShapeElement::new(
-        document::Geometry::Rect(kurbo::Rect::new(10.0, 10.0, 240.0, 240.0)),
-        document::Style::filled(palette::css::RED),
-    );
-    app.document.add(el);
-
+    app.els = vec![
+        el::rect(
+            Rect::new(0., 0., 100., 100.),
+            el::Style::filled(palette::css::RED),
+            None,
+        ),
+        el::circle(
+            Circle::new(Point::ORIGIN, 40.),
+            el::Style::stroked(palette::css::BLUE, 3.0),
+            Some(Affine::translate((200., 50.))),
+        ),
+        el::ellipse(
+            Ellipse::new(Point::ORIGIN, Vec2::new(60., 30.), 0.3),
+            el::Style::filled_and_stroked(palette::css::GREEN, palette::css::DARK_GREEN, 2.0),
+            Some(Affine::translate((200., 150.))),
+        ),
+        el::rounded_rect(
+            RoundedRect::new(0., 0., 120., 80., 12.),
+            el::Style::stroked(palette::css::GOLD, 4.0),
+            Some(Affine::translate((0., 250.))),
+        ),
+        el::triangle(
+            Triangle::new(
+                Point::new(0., -50.),
+                Point::new(-50., 40.),
+                Point::new(50., 40.),
+            ),
+            el::Style::filled(palette::css::PURPLE),
+            Some(Affine::translate((400., 100.)) * Affine::rotate(0.5)),
+        ),
+        el::line(
+            Line::new(Point::new(0., 0.), Point::new(150., 100.)),
+            el::Style::stroked(palette::css::ORANGE, 5.0),
+            Some(Affine::translate((400., 250.))),
+        ),
+        el::cubic_bez(
+            CubicBez::new(
+                Point::new(0., 0.),
+                Point::new(30., -80.),
+                Point::new(90., 80.),
+                Point::new(120., 0.),
+            ),
+            el::Style::stroked(palette::css::DEEP_PINK, 2.5),
+            Some(Affine::translate((600., 250.))),
+        ),
+        el::quad_bez(
+            QuadBez::new(
+                Point::new(0., 0.),
+                Point::new(50., -60.),
+                Point::new(100., 0.),
+            ),
+            el::Style::stroked(palette::css::GRAY, 2.0),
+            Some(Affine::translate((0., 400.))),
+        ),
+        el::circle_segment(
+            CircleSegment::new(Point::ORIGIN, 70., 30., 0.0, std::f64::consts::FRAC_PI_3),
+            el::Style::filled(palette::css::LIGHT_SKY_BLUE),
+            Some(Affine::translate((250., 400.))),
+        ),
+        el::bez_path(
+            {
+                let mut path = BezPath::new();
+                let n = 5;
+                let outer = 60.0;
+                let inner = 25.0;
+                for i in 0..(n * 2) {
+                    let r = if i % 2 == 0 { outer } else { inner };
+                    let theta =
+                        std::f64::consts::PI * i as f64 / n as f64 - std::f64::consts::FRAC_PI_2;
+                    let pt = Point::new(r * theta.cos(), r * theta.sin());
+                    if i == 0 {
+                        path.move_to(pt);
+                    } else {
+                        path.line_to(pt);
+                    }
+                }
+                path.close_path();
+                path
+            },
+            el::Style::filled_and_stroked(palette::css::YELLOW, palette::css::SADDLE_BROWN, 2.0),
+            Some(Affine::translate((450., 400.))),
+        ),
+        el::rect(
+            Rect::new(0., 0., 40., 40.),
+            el::Style::filled(palette::css::CRIMSON.with_alpha(0.4)),
+            Some(Affine::translate((650., 400.)) * Affine::scale(3.0)),
+        ),
+    ];
     let _ = event_loop.run_app(&mut app);
 }
