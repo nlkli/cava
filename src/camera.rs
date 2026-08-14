@@ -3,7 +3,7 @@ use vello::{
     kurbo::{Affine, Point, Rect, Size, Vec2},
 };
 
-use crate::el::El;
+use crate::elem::Elem;
 
 pub const MIN_ZOOM: f64 = 1e-6;
 pub const MAX_ZOOM: f64 = 1e6;
@@ -165,7 +165,7 @@ impl Camera {
 
     pub fn render<'a, I>(&mut self, scene: &mut Scene, els: I)
     where
-        I: IntoIterator<Item = &'a mut El>,
+        I: IntoIterator<Item = &'a mut Elem>,
     {
         let camera_transform = self.transform();
         let visible = self.visible_world_rect();

@@ -1,5 +1,7 @@
+use std::num::NonZero;
 use anyhow::{Context, Result};
 use configparser::ini::Ini;
+use vello::{AaConfig, AaSupport, RendererOptions, wgpu::PresentMode};
 
 macro_rules! parse_string {
     ($ini:expr, $section:expr, $key:expr, $target:expr) => {
@@ -11,12 +13,11 @@ macro_rules! parse_string {
 
 macro_rules! parse_number {
     ($ini:expr, $section:expr, $key:expr, $target:expr, $type:ty) => {
-        if let Some(v) = $ini.get($section, $key) {
-            $target = v.parse::<$type>().context(format!(
-                "Failed to parse '{}' as {}",
-                v,
-                stringify!($type)
-            ))?;
+        if let Some(v) = $ini
+            .get($section, $key)
+            .and_then(|v| v.parse::<$type>().ok())
+        {
+            $target = v;
         }
     };
 }
@@ -30,6 +31,84 @@ macro_rules! parse_bool {
             $target = v;
         }
     };
+}
+
+#[derive(Clone, Debug)]
+pub struct Render {
+    present_mode: String,
+    use_cpu: bool,
+    antialiasing_support: String,
+    num_init_threads: u32,
+    antialiasing_method: String,
+}
+
+impl Default for Render {
+    fn default() -> Self {
+        Self {
+            present_mode: "AutoVsync".into(),
+            use_cpu: false,
+            antialiasing_support: "All".into(),
+            num_init_threads: 0,
+            antialiasing_method: "Auto".into(),
+        }
+    }
+}
+
+impl Render {
+    pub fn present_mode(&self) -> PresentMode {
+        match self.present_mode.to_lowercase().as_str().trim() {
+            "autovsync" | "auto_vsync" | "auto-vsync" | "0" => PresentMode::AutoVsync,
+            "autonovsync" | "auto_novsync" | "auto-novsync" | "1" => PresentMode::AutoNoVsync,
+            "fifo" | "2" => PresentMode::Fifo,
+            "fiforelaxed" | "fifo_relaxed" | "fifo-relaxed" | "3" => PresentMode::FifoRelaxed,
+            "immediate" | "4" => PresentMode::Immediate,
+            "mailbox" | "5" => PresentMode::Mailbox,
+            _ => PresentMode::AutoVsync,
+        }
+    }
+
+    pub fn renderer_options(&self) -> RendererOptions {
+        let mut ro = RendererOptions {
+            use_cpu: self.use_cpu,
+            ..Default::default()
+        };
+
+        if !self.antialiasing_support.is_empty() {
+            let mut aa_support = AaSupport {
+                area: false,
+                msaa8: false,
+                msaa16: false,
+            };
+            for part in self
+                .antialiasing_support
+                .split(|c| c == ',' || c == '+' || c == ' ')
+            {
+                match part.trim().to_lowercase().as_str() {
+                    "all" | "everything" | "full" => aa_support = AaSupport::all(),
+                    "area" | "0" => aa_support.area = true,
+                    "msaa8" | "8" => aa_support.msaa8 = true,
+                    "msaa16" | "16" => aa_support.msaa16 = true,
+                    _ => {}
+                }
+            }
+            ro.antialiasing_support = aa_support;
+        }
+
+        if self.num_init_threads > 0 {
+            ro.num_init_threads = Some(NonZero::new(self.num_init_threads as usize).unwrap());
+        }
+
+        ro
+    }
+
+    pub fn antialiasing_method(&self) -> AaConfig {
+        match self.antialiasing_method.to_lowercase().as_str().trim() {
+            "area" | "0" => AaConfig::Area,
+            "msaa8" | "8" => AaConfig::Msaa8,
+            "msaa16" | "16" => AaConfig::Msaa16,
+            _ => AaConfig::Area,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -143,14 +222,97 @@ impl Default for Window {
     }
 }
 
+impl Window {
+    pub fn attributes(&self) -> winit::window::WindowAttributes {
+        let w = &self;
+
+        let mut attr = winit::window::Window::default_attributes()
+            .with_title(&w.title)
+            .with_inner_size(winit::dpi::LogicalSize::new(w.width, w.height))
+            .with_resizable(w.resizable)
+            .with_decorations(w.decorations)
+            .with_transparent(w.transparent)
+            .with_maximized(w.maximized)
+            .with_fullscreen(if w.fullscreen {
+                Some(winit::window::Fullscreen::Borderless(None))
+            } else {
+                None
+            });
+
+        if w.x > 0 || w.y > 0 {
+            attr = attr.with_position(winit::dpi::LogicalPosition::new(w.x, w.y));
+        }
+
+        if let Some(p) = w.position {
+            attr = attr.with_position(winit::dpi::LogicalPosition::new(p.0, p.1));
+        }
+
+        let mut min_inner_size = winit::dpi::LogicalSize::new(1, 1);
+        if w.min_width > 0 {
+            let min_width = w.min_width.max(1);
+            min_inner_size.width = min_width;
+        }
+        if w.min_height > 0 {
+            let min_height = w.min_height.max(1);
+            min_inner_size.height = min_height;
+        }
+        attr = attr.with_min_inner_size(min_inner_size);
+
+        if w.max_width > 0 || w.max_height > 0 {
+            let mut max_inner_size = winit::dpi::LogicalSize::new(u32::MAX, u32::MAX);
+            if w.max_width > 0 {
+                max_inner_size.width = w.max_width.max(2);
+            }
+            if w.max_height > 0 {
+                max_inner_size.height = w.max_height.max(2);
+            }
+            attr = attr.with_max_inner_size(max_inner_size);
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+
+            attr = attr
+                .with_titlebar_transparent(w.macos_titlebar_transparent)
+                .with_titlebar_hidden(w.macos_titlebar_hidden)
+                .with_titlebar_buttons_hidden(w.macos_titlebar_buttons_hidden)
+                .with_title_hidden(w.macos_title_hidden)
+                .with_fullsize_content_view(w.macos_fullsize_content_view)
+                .with_has_shadow(w.macos_has_shadow)
+                .with_borderless_game(w.macos_borderless_game)
+                .with_disallow_hidpi(w.macos_disallow_hidpi);
+
+            if !w.macos_option_as_alt.is_empty() {
+                let option = match w.macos_option_as_alt.to_lowercase().as_str() {
+                    "none" => winit::platform::macos::OptionAsAlt::None,
+                    "only_left" => winit::platform::macos::OptionAsAlt::OnlyLeft,
+                    "only_right" => winit::platform::macos::OptionAsAlt::OnlyRight,
+                    "both" => winit::platform::macos::OptionAsAlt::Both,
+                    _ => winit::platform::macos::OptionAsAlt::None,
+                };
+                attr = attr.with_option_as_alt(option);
+            }
+
+            if !w.macos_tabbing_identifier.is_empty() {
+                attr = attr.with_tabbing_identifier(&w.macos_tabbing_identifier);
+            }
+        }
+
+        attr
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub render: Render,
     pub window: Window,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            render: Render::default(),
             window: Window::default(),
         }
     }
@@ -165,6 +327,28 @@ impl Config {
         ini.load(path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let mut config = default.unwrap_or_default();
+
+        parse_string!(ini, "render", "present_mode", config.render.present_mode);
+        parse_bool!(ini, "render", "use_cpu", config.render.use_cpu);
+        parse_string!(
+            ini,
+            "render",
+            "antialiasing_support",
+            config.render.antialiasing_support
+        );
+        parse_number!(
+            ini,
+            "render",
+            "num_init_threads",
+            config.render.num_init_threads,
+            u32
+        );
+        parse_string!(
+            ini,
+            "render",
+            "antialiasing_method",
+            config.render.antialiasing_method
+        );
 
         parse_string!(ini, "window", "title", config.window.title);
         parse_number!(ini, "window", "width", config.window.width, u32);
@@ -263,84 +447,5 @@ impl Config {
         }
 
         Ok(config)
-    }
-
-    pub fn window_attributes(&self) -> winit::window::WindowAttributes {
-        let w = &self.window;
-
-        let mut attr = winit::window::Window::default_attributes()
-            .with_title(&w.title)
-            .with_inner_size(winit::dpi::LogicalSize::new(w.width, w.height))
-            .with_resizable(w.resizable)
-            .with_decorations(w.decorations)
-            .with_transparent(w.transparent)
-            .with_maximized(w.maximized)
-            .with_fullscreen(if w.fullscreen {
-                Some(winit::window::Fullscreen::Borderless(None))
-            } else {
-                None
-            });
-
-        if w.x > 0 || w.y > 0 {
-            attr = attr.with_position(winit::dpi::LogicalPosition::new(w.x, w.y));
-        }
-
-        if let Some(p) = w.position {
-            attr = attr.with_position(winit::dpi::LogicalPosition::new(p.0, p.1));
-        }
-
-        let mut min_inner_size = winit::dpi::LogicalSize::new(1, 1);
-        if w.min_width > 0 {
-            let min_width = w.min_width.max(1);
-            min_inner_size.width = min_width;
-        }
-        if w.min_height > 0 {
-            let min_height = w.min_height.max(1);
-            min_inner_size.height = min_height;
-        }
-        attr = attr.with_min_inner_size(min_inner_size);
-
-        if w.max_width > 0 || w.max_height > 0 {
-            let mut max_inner_size = winit::dpi::LogicalSize::new(u32::MAX, u32::MAX);
-            if w.max_width > 0 {
-                max_inner_size.width = w.max_width.max(2);
-            }
-            if w.max_height > 0 {
-                max_inner_size.height = w.max_height.max(2);
-            }
-            attr = attr.with_max_inner_size(max_inner_size);
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            use winit::platform::macos::WindowAttributesExtMacOS;
-
-            attr = attr
-                .with_titlebar_transparent(w.macos_titlebar_transparent)
-                .with_titlebar_hidden(w.macos_titlebar_hidden)
-                .with_titlebar_buttons_hidden(w.macos_titlebar_buttons_hidden)
-                .with_title_hidden(w.macos_title_hidden)
-                .with_fullsize_content_view(w.macos_fullsize_content_view)
-                .with_has_shadow(w.macos_has_shadow)
-                .with_borderless_game(w.macos_borderless_game)
-                .with_disallow_hidpi(w.macos_disallow_hidpi);
-
-            if !w.macos_option_as_alt.is_empty() {
-                let option = match w.macos_option_as_alt.to_lowercase().as_str() {
-                    "none" => winit::platform::macos::OptionAsAlt::None,
-                    "only_left" => winit::platform::macos::OptionAsAlt::OnlyLeft,
-                    "only_right" => winit::platform::macos::OptionAsAlt::OnlyRight,
-                    "both" => winit::platform::macos::OptionAsAlt::Both,
-                    _ => winit::platform::macos::OptionAsAlt::None,
-                };
-                attr = attr.with_option_as_alt(option);
-            }
-
-            if !w.macos_tabbing_identifier.is_empty() {
-                attr = attr.with_tabbing_identifier(&w.macos_tabbing_identifier);
-            }
-        }
-
-        attr
     }
 }

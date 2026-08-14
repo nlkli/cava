@@ -139,11 +139,11 @@ impl Shape for AnyShape {
     }
 }
 
-macro_rules! any_shape {
-    ($shape:expr) => {
-        AnyShape::from($shape)
-    };
-}
+// macro_rules! any_shape {
+//     ($shape:expr) => {
+//         AnyShape::from($shape)
+//     };
+// }
 
 impl From<Rect> for AnyShape {
     fn from(shape: Rect) -> Self {
@@ -218,11 +218,11 @@ impl From<CircleSegment> for AnyShape {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ElBuilder {
-    el: El,
+pub struct ElemBuilder {
+    el: Elem,
 }
 
-impl ElBuilder {
+impl ElemBuilder {
     pub fn new() -> Self {
         Self::default()
     }
@@ -237,7 +237,7 @@ impl ElBuilder {
         self
     }
 
-    pub fn with_state(mut self, state: ElState) -> Self {
+    pub fn with_state(mut self, state: ElemState) -> Self {
         self.el.state = state;
         self
     }
@@ -277,21 +277,21 @@ impl ElBuilder {
         self
     }
 
-    pub fn build(mut self) -> El {
+    pub fn build(mut self) -> Elem {
         self.el.bbox = self.el.shape.bounding_box();
         self.el
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ElState {
+pub struct ElemState {
     pub position: Point,
     pub rotation: f64,
     pub scale: Vec2,
     pub anchor: Vec2,
 }
 
-impl Default for ElState {
+impl Default for ElemState {
     fn default() -> Self {
         Self {
             position: Point::ZERO,
@@ -303,23 +303,23 @@ impl Default for ElState {
 }
 
 #[derive(Debug, Clone)]
-pub struct El {
+pub struct Elem {
     pub style: Style,
     shape: AnyShape,
     bbox: Rect,
-    state: ElState,
+    state: ElemState,
     transform: Affine,
     dirty: bool,
 }
 
-impl Default for El {
+impl Default for Elem {
     fn default() -> Self {
-        El::new(Rect::default().into(), Style::default(), None)
+        Elem::new(Rect::default().into(), Style::default(), None)
     }
 }
 
-impl El {
-    pub fn new(shape: AnyShape, style: Style, state: Option<ElState>) -> Self {
+impl Elem {
+    pub fn new(shape: AnyShape, style: Style, state: Option<ElemState>) -> Self {
         let bbox = shape.bounding_box();
         Self {
             style,
@@ -331,17 +331,17 @@ impl El {
         }
     }
 
-    pub fn builder() -> ElBuilder {
-        ElBuilder::new()
+    pub fn builder() -> ElemBuilder {
+        ElemBuilder::new()
     }
 
     #[inline(always)]
-    pub fn state(&self) -> &ElState {
+    pub fn state(&self) -> &ElemState {
         &self.state
     }
 
     #[inline(always)]
-    pub fn state_mut(&mut self) -> &mut ElState {
+    pub fn state_mut(&mut self) -> &mut ElemState {
         self.dirty = true;
         &mut self.state
     }
