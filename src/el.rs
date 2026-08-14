@@ -1,17 +1,21 @@
 use vello::Scene;
 use vello::kurbo::{
     Affine, Arc, BezPath, Circle, CircleSegment, CubicBez, Ellipse, Line, PathEl, PathSeg, Point,
-    QuadBez, Rect, RoundedRect, Shape, Stroke, Triangle,
+    QuadBez, Rect, RoundedRect, Shape, Stroke, Triangle, Vec2,
 };
 use vello::peniko::{Color, Fill};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Style {
     pub fill: Option<Color>,
     pub stroke: Option<(Color, f64)>,
 }
 
 impl Style {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn filled(color: Color) -> Self {
         Self {
             fill: Some(color),
@@ -28,6 +32,18 @@ impl Style {
         Self {
             fill: Some(fill),
             stroke: Some((stroke, width)),
+        }
+    }
+
+    pub fn set_fill_color(&mut self, color: Color) {
+        if let Some(fill) = &mut self.fill {
+            *fill = color;
+        }
+    }
+
+    pub fn set_stroke_color(&mut self, color: Color) {
+        if let Some((stroke_color, _)) = &mut self.stroke {
+            *stroke_color = color;
         }
     }
 }
@@ -123,46 +139,282 @@ impl Shape for AnyShape {
     }
 }
 
+macro_rules! any_shape {
+    ($shape:expr) => {
+        AnyShape::from($shape)
+    };
+}
+
+impl From<Rect> for AnyShape {
+    fn from(shape: Rect) -> Self {
+        AnyShape::Rect(shape)
+    }
+}
+
+impl From<Ellipse> for AnyShape {
+    fn from(shape: Ellipse) -> Self {
+        AnyShape::Ellipse(shape)
+    }
+}
+
+impl From<Line> for AnyShape {
+    fn from(shape: Line) -> Self {
+        AnyShape::Line(shape)
+    }
+}
+
+impl From<Circle> for AnyShape {
+    fn from(shape: Circle) -> Self {
+        AnyShape::Circle(shape)
+    }
+}
+
+impl From<BezPath> for AnyShape {
+    fn from(shape: BezPath) -> Self {
+        AnyShape::BezPath(shape)
+    }
+}
+
+impl From<PathSeg> for AnyShape {
+    fn from(shape: PathSeg) -> Self {
+        AnyShape::PathSeg(shape)
+    }
+}
+
+impl From<RoundedRect> for AnyShape {
+    fn from(shape: RoundedRect) -> Self {
+        AnyShape::RoundedRect(shape)
+    }
+}
+
+impl From<Triangle> for AnyShape {
+    fn from(shape: Triangle) -> Self {
+        AnyShape::Triangle(shape)
+    }
+}
+
+impl From<Arc> for AnyShape {
+    fn from(shape: Arc) -> Self {
+        AnyShape::Arc(shape)
+    }
+}
+
+impl From<CubicBez> for AnyShape {
+    fn from(shape: CubicBez) -> Self {
+        AnyShape::CubicBez(shape)
+    }
+}
+
+impl From<QuadBez> for AnyShape {
+    fn from(shape: QuadBez) -> Self {
+        AnyShape::QuadBez(shape)
+    }
+}
+
+impl From<CircleSegment> for AnyShape {
+    fn from(shape: CircleSegment) -> Self {
+        AnyShape::CircleSegment(shape)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ElBuilder {
+    el: El,
+}
+
+impl ElBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_shape(mut self, any_shape: impl Into<AnyShape>) -> Self {
+        self.el.shape = any_shape.into();
+        self
+    }
+
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.el.style = style;
+        self
+    }
+
+    pub fn with_state(mut self, state: ElState) -> Self {
+        self.el.state = state;
+        self
+    }
+
+    pub fn with_position(mut self, position: Point) -> Self {
+        self.el.state.position = position;
+        self
+    }
+
+    pub fn with_position_point(mut self, x: f64, y: f64) -> Self {
+        self.el.state.position = Point::new(x, y);
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation: f64) -> Self {
+        self.el.state.rotation = rotation;
+        self
+    }
+
+    pub fn with_scale(mut self, scale: Vec2) -> Self {
+        self.el.state.scale = scale;
+        self
+    }
+
+    pub fn with_scale_values(mut self, x: f64, y: f64) -> Self {
+        self.el.state.scale = Vec2::new(x, y);
+        self
+    }
+
+    pub fn with_anchor(mut self, anchor: Vec2) -> Self {
+        self.el.state.anchor = anchor;
+        self
+    }
+
+    pub fn with_anchor_values(mut self, x: f64, y: f64) -> Self {
+        self.el.state.anchor = Vec2::new(x, y);
+        self
+    }
+
+    pub fn build(mut self) -> El {
+        self.el.bbox = self.el.shape.bounding_box();
+        self.el
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ElState {
+    pub position: Point,
+    pub rotation: f64,
+    pub scale: Vec2,
+    pub anchor: Vec2,
+}
+
+impl Default for ElState {
+    fn default() -> Self {
+        Self {
+            position: Point::ZERO,
+            rotation: 0.0,
+            scale: Vec2::new(1.0, 1.0),
+            anchor: Vec2::new(0.5, 0.5),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct El {
-    pub shape: AnyShape,
     pub style: Style,
-    pub transform: Affine,
+    shape: AnyShape,
+    bbox: Rect,
+    state: ElState,
+    transform: Affine,
+    dirty: bool,
+}
+
+impl Default for El {
+    fn default() -> Self {
+        El::new(Rect::default().into(), Style::default(), None)
+    }
 }
 
 impl El {
-    pub fn new(shape: AnyShape, style: Style, transform: Option<Affine>) -> Self {
+    pub fn new(shape: AnyShape, style: Style, state: Option<ElState>) -> Self {
+        let bbox = shape.bounding_box();
         Self {
-            shape,
             style,
-            transform: transform.unwrap_or(Affine::IDENTITY),
+            shape,
+            bbox,
+            state: state.unwrap_or_default(),
+            transform: Affine::IDENTITY,
+            dirty: true,
         }
     }
 
-    pub fn world_bounding_box(&self) -> Rect {
-        let local = self.shape.bounding_box();
-        let pts = [
-            self.transform * Point::new(local.x0, local.y0),
-            self.transform * Point::new(local.x1, local.y0),
-            self.transform * Point::new(local.x1, local.y1),
-            self.transform * Point::new(local.x0, local.y1),
-        ];
-        let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
-        let (mut x1, mut y1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-        for p in pts {
-            x0 = x0.min(p.x);
-            y0 = y0.min(p.y);
-            x1 = x1.max(p.x);
-            y1 = y1.max(p.y);
-        }
-        Rect::new(x0, y0, x1, y1)
+    pub fn builder() -> ElBuilder {
+        ElBuilder::new()
     }
 
-    pub fn render(&self, scene: &mut Scene) {
+    #[inline(always)]
+    pub fn state(&self) -> &ElState {
+        &self.state
+    }
+
+    #[inline(always)]
+    pub fn state_mut(&mut self) -> &mut ElState {
+        self.dirty = true;
+        &mut self.state
+    }
+
+    #[inline(always)]
+    pub fn shape(&self) -> AnyShape {
+        self.shape.clone()
+    }
+
+    #[inline(always)]
+    pub fn set_shape(&mut self, shape: AnyShape) {
+        self.bbox = shape.bounding_box();
+        self.shape = shape;
+        self.dirty = true;
+    }
+
+    #[inline(always)]
+    fn anchor_offset(&self) -> Vec2 {
+        Vec2::new(
+            self.bbox.x0 + self.bbox.width() * self.state.anchor.x,
+            self.bbox.y0 + self.bbox.height() * self.state.anchor.y,
+        )
+    }
+
+    pub fn transform(&mut self) -> Affine {
+        if self.dirty {
+            let anchor = self.anchor_offset();
+            self.transform = Affine::translate(self.state.position.to_vec2())
+                * Affine::rotate(self.state.rotation)
+                * Affine::scale_non_uniform(self.state.scale.x, self.state.scale.y)
+                * Affine::translate(-anchor);
+            self.dirty = false;
+        }
+        self.transform
+    }
+
+    // Cheap check instead of unreliable float equality with IDENTITY.
+    #[inline(always)]
+    fn is_identity_state(&self) -> bool {
+        self.state.rotation == 0.0
+            && self.state.scale == Vec2::new(1.0, 1.0)
+            && self.state.position == Point::ZERO
+    }
+
+    #[inline]
+    pub fn world_bounding_box(&mut self) -> Rect {
+        let transform = self.transform();
+        let local = self.bbox;
+
+        if self.is_identity_state() {
+            return local;
+        }
+
+        let [a, b, c, d, e, f] = transform.as_coeffs();
+        let cx = (local.x0 + local.x1) * 0.5;
+        let cy = (local.y0 + local.y1) * 0.5;
+        let ex = (local.x1 - local.x0) * 0.5;
+        let ey = (local.y1 - local.y0) * 0.5;
+        let ncx = a * cx + c * cy + e;
+        let ncy = b * cx + d * cy + f;
+        let nex = a.abs() * ex + c.abs() * ey;
+        let ney = b.abs() * ex + d.abs() * ey;
+        Rect::new(ncx - nex, ncy - ney, ncx + nex, ncy + ney)
+    }
+
+    // Must be &mut to guarantee the cached transform reflects current state
+    // before it's read directly below — this was a real bug (stale transform bypass).
+    pub fn render(&mut self, scene: &mut Scene) {
         self.render_with_base(scene, Affine::IDENTITY);
     }
 
-    pub fn render_with_base(&self, scene: &mut Scene, base: Affine) {
-        let transform = base * self.transform;
+    pub fn render_with_base(&mut self, scene: &mut Scene, base: Affine) {
+        let transform = base * self.transform(); // forces recompute if dirty
         if let Some(color) = self.style.fill {
             scene.fill(Fill::NonZero, transform, color, None, &self.shape);
         }
@@ -171,41 +423,4 @@ impl El {
             scene.stroke(&stroke, transform, color, None, &self.shape);
         }
     }
-}
-
-pub fn rect(rect: Rect, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::Rect(rect), style, transform)
-}
-pub fn ellipse(ellipse: Ellipse, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::Ellipse(ellipse), style, transform)
-}
-pub fn line(line: Line, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::Line(line), style, transform)
-}
-pub fn circle(circle: Circle, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::Circle(circle), style, transform)
-}
-pub fn bez_path(path: BezPath, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::BezPath(path), style, transform)
-}
-pub fn path_seg(seg: PathSeg, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::PathSeg(seg), style, transform)
-}
-pub fn rounded_rect(rect: RoundedRect, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::RoundedRect(rect), style, transform)
-}
-pub fn triangle(tri: Triangle, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::Triangle(tri), style, transform)
-}
-pub fn arc(arc: Arc, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::Arc(arc), style, transform)
-}
-pub fn cubic_bez(cubic: CubicBez, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::CubicBez(cubic), style, transform)
-}
-pub fn quad_bez(quad: QuadBez, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::QuadBez(quad), style, transform)
-}
-pub fn circle_segment(seg: CircleSegment, style: Style, transform: Option<Affine>) -> El {
-    El::new(AnyShape::CircleSegment(seg), style, transform)
 }

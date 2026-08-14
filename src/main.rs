@@ -8,7 +8,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use vello::peniko::color::palette;
 use vello::util::{RenderContext, RenderSurface};
 use vello::wgpu::CurrentSurfaceTexture;
-use vello::{AaConfig, Renderer, RendererOptions, Scene, kurbo, wgpu};
+use vello::{AaConfig, Renderer, RendererOptions, Scene, wgpu};
 
 use vello::kurbo::{
     Affine, BezPath, Circle, CircleSegment, CubicBez, Ellipse, Line, Point, QuadBez, Rect,
@@ -21,6 +21,8 @@ mod camera;
 mod cli;
 mod config;
 mod el;
+
+use el::{El, Style as ElStyle};
 
 use camera::Camera;
 
@@ -148,7 +150,7 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll_y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y as f64,
-                    MouseScrollDelta::PixelDelta(pos) => pos.y / 40.0, // нормировка под "линии"
+                    MouseScrollDelta::PixelDelta(pos) => pos.y / 40.0,
                 };
 
                 let factor = 1.1_f64.powf(scroll_y);
@@ -173,7 +175,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.scene.reset();
 
-                self.camera.render(&mut self.scene, &self.els);
+                self.camera.render(&mut self.scene, &mut self.els);
 
                 let width = surface.config.width;
                 let height = surface.config.height;
@@ -261,93 +263,12 @@ fn main() {
         pan_last: Point::ORIGIN,
     };
 
-    app.els = vec![
-        el::rect(
-            Rect::new(0., 0., 100., 100.),
-            el::Style::filled(palette::css::RED),
-            None,
-        ),
-        el::circle(
-            Circle::new(Point::ORIGIN, 40.),
-            el::Style::stroked(palette::css::BLUE, 3.0),
-            Some(Affine::translate((200., 50.))),
-        ),
-        el::ellipse(
-            Ellipse::new(Point::ORIGIN, Vec2::new(60., 30.), 0.3),
-            el::Style::filled_and_stroked(palette::css::GREEN, palette::css::DARK_GREEN, 2.0),
-            Some(Affine::translate((200., 150.))),
-        ),
-        el::rounded_rect(
-            RoundedRect::new(0., 0., 120., 80., 12.),
-            el::Style::stroked(palette::css::GOLD, 4.0),
-            Some(Affine::translate((0., 250.))),
-        ),
-        el::triangle(
-            Triangle::new(
-                Point::new(0., -50.),
-                Point::new(-50., 40.),
-                Point::new(50., 40.),
-            ),
-            el::Style::filled(palette::css::PURPLE),
-            Some(Affine::translate((400., 100.)) * Affine::rotate(0.5)),
-        ),
-        el::line(
-            Line::new(Point::new(0., 0.), Point::new(150., 100.)),
-            el::Style::stroked(palette::css::ORANGE, 5.0),
-            Some(Affine::translate((400., 250.))),
-        ),
-        el::cubic_bez(
-            CubicBez::new(
-                Point::new(0., 0.),
-                Point::new(30., -80.),
-                Point::new(90., 80.),
-                Point::new(120., 0.),
-            ),
-            el::Style::stroked(palette::css::DEEP_PINK, 2.5),
-            Some(Affine::translate((600., 250.))),
-        ),
-        el::quad_bez(
-            QuadBez::new(
-                Point::new(0., 0.),
-                Point::new(50., -60.),
-                Point::new(100., 0.),
-            ),
-            el::Style::stroked(palette::css::GRAY, 2.0),
-            Some(Affine::translate((0., 400.))),
-        ),
-        el::circle_segment(
-            CircleSegment::new(Point::ORIGIN, 70., 30., 0.0, std::f64::consts::FRAC_PI_3),
-            el::Style::filled(palette::css::LIGHT_SKY_BLUE),
-            Some(Affine::translate((250., 400.))),
-        ),
-        el::bez_path(
-            {
-                let mut path = BezPath::new();
-                let n = 5;
-                let outer = 60.0;
-                let inner = 25.0;
-                for i in 0..(n * 2) {
-                    let r = if i % 2 == 0 { outer } else { inner };
-                    let theta =
-                        std::f64::consts::PI * i as f64 / n as f64 - std::f64::consts::FRAC_PI_2;
-                    let pt = Point::new(r * theta.cos(), r * theta.sin());
-                    if i == 0 {
-                        path.move_to(pt);
-                    } else {
-                        path.line_to(pt);
-                    }
-                }
-                path.close_path();
-                path
-            },
-            el::Style::filled_and_stroked(palette::css::YELLOW, palette::css::SADDLE_BROWN, 2.0),
-            Some(Affine::translate((450., 400.))),
-        ),
-        el::rect(
-            Rect::new(0., 0., 40., 40.),
-            el::Style::filled(palette::css::CRIMSON.with_alpha(0.4)),
-            Some(Affine::translate((650., 400.)) * Affine::scale(3.0)),
-        ),
-    ];
+    app.els.push(
+        el::El::builder()
+            .with_shape(Rect::new(10., 10., 40., 40.))
+            .with_style(ElStyle::filled(palette::css::RED))
+            .with_rotation(30.)
+            .build(),
+    );
     let _ = event_loop.run_app(&mut app);
 }

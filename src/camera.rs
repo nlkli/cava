@@ -165,7 +165,7 @@ impl Camera {
 
     pub fn render<'a, I>(&mut self, scene: &mut Scene, els: I)
     where
-        I: IntoIterator<Item = &'a El>,
+        I: IntoIterator<Item = &'a mut El>,
     {
         let camera_transform = self.transform();
         let visible = self.visible_world_rect();
