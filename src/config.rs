@@ -42,6 +42,7 @@ pub struct Window {
     pub position: Option<(u32, u32)>,
     pub fullscreen: bool,
     pub resizable: bool,
+    pub active: bool,
     pub decorations: bool,
     pub transparent: bool,
     pub maximized: bool,
@@ -88,7 +89,7 @@ pub struct Window {
 impl Default for Window {
     fn default() -> Self {
         Self {
-            title: "cava".into(),
+            title: "void".into(),
             width: 800,
             height: 600,
             x: 0,
@@ -96,6 +97,7 @@ impl Default for Window {
             position: None,
             fullscreen: false,
             resizable: true,
+            active: true,
             decorations: true,
             transparent: false,
             maximized: false,
@@ -169,6 +171,7 @@ impl Config {
         parse_number!(ini, "window", "height", config.window.height, u32);
         parse_bool!(ini, "window", "fullscreen", config.window.fullscreen);
         parse_bool!(ini, "window", "resizable", config.window.resizable);
+        parse_bool!(ini, "window", "active", config.window.active);
         parse_bool!(ini, "window", "decorations", config.window.decorations);
         parse_bool!(ini, "window", "transparent", config.window.transparent);
         parse_bool!(ini, "window", "maximized", config.window.maximized);

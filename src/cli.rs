@@ -1,8 +1,8 @@
 use crate::config::Config;
 
-const VERSION: &str = "cava 0.1.0 [https://github.com/nlkli/cava]";
-const HELP: &str = r#"cava - visualizer
-Usage: cava [OPTIONS] [CONFIG_PATH]
+const VERSION: &str = "void 0.1.0 [https://github.com/nlkli/void]";
+const HELP: &str = r#"void - visualizer
+Usage: void [OPTIONS] [CONFIG_PATH]
 Options:
   -t, --title <TITLE>                       Window title
   -w, --width <WIDTH>                       Window width
