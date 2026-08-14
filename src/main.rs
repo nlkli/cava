@@ -1,6 +1,6 @@
 use vello::kurbo::Size;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::Key;
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 mod camera;
 mod cli;
+mod config;
 mod el;
 
 use camera::Camera;
@@ -32,6 +33,8 @@ enum RenderState {
     },
 }
 
+struct MouseState {}
+
 struct App {
     init_window_attr: Option<WindowAttributes>,
     rctx: RenderContext,
@@ -39,6 +42,10 @@ struct App {
     scene: Scene,
     camera: Camera,
     els: Vec<el::El>,
+
+    cursor_pos: Point,
+    panning: bool,
+    pan_last: Point,
 }
 
 impl ApplicationHandler for App {
@@ -103,6 +110,50 @@ impl ApplicationHandler for App {
                         Size::new(size.width as f64, size.height as f64);
                     window.request_redraw();
                 }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_pos = Point::new(position.x, position.y);
+
+                if self.panning {
+                    let delta = self.cursor_pos - self.pan_last;
+                    // экранный сдвиг -> мировой, с учётом zoom и rotation
+                    let zoom = self.camera.state_mut().zoom; // см. примечание ниже
+                    let (sin_t, cos_t) = self.camera.state_mut().rotation.sin_cos();
+                    let dx = cos_t * delta.x + sin_t * delta.y;
+                    let dy = -sin_t * delta.x + cos_t * delta.y;
+
+                    let s = self.camera.state_mut();
+                    s.position.x -= dx / s.zoom;
+                    s.position.y -= dy / s.zoom;
+
+                    self.pan_last = self.cursor_pos;
+                    window.request_redraw();
+                }
+            }
+
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Middle || button == MouseButton::Left {
+                    match state {
+                        ElementState::Pressed => {
+                            self.panning = true;
+                            self.pan_last = self.cursor_pos;
+                        }
+                        ElementState::Released => {
+                            self.panning = false;
+                        }
+                    }
+                }
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll_y = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y as f64,
+                    MouseScrollDelta::PixelDelta(pos) => pos.y / 40.0, // нормировка под "линии"
+                };
+
+                let factor = 1.1_f64.powf(scroll_y);
+                self.camera.zoom_by_at(self.cursor_pos, factor);
+                window.request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 match event.logical_key.as_ref() {
@@ -194,12 +245,20 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
 
     let mut app = App {
-        init_window_attr: Some(args.window_attributes()),
+        init_window_attr: Some(args.config.window_attributes()),
         rctx: RenderContext::new(),
         rstate: RenderState::Suspended(None),
         scene: Scene::new(),
-        camera: Camera::new(Size::new(args.width as f64, args.height as f64)),
+        camera: Camera::builder()
+            .with_viewport_size(
+                args.config.window.width as f64,
+                args.config.window.height as f64,
+            )
+            .build(),
         els: Vec::new(),
+        cursor_pos: Point::ORIGIN,
+        panning: false,
+        pan_last: Point::ORIGIN,
     };
 
     app.els = vec![

@@ -231,6 +231,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrayvec",
+ "configparser",
  "pollster",
  "vello",
  "winit",
@@ -295,6 +296,12 @@ checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "configparser"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46dec724fd22199ebde05033a0cbae453bc3b1ecff11eb6a6bb3eec4b90c6a4"
 
 [[package]]
 name = "core-foundation"
