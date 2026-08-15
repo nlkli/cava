@@ -5,10 +5,10 @@ use vello::kurbo::{
 };
 use vello::peniko::{Color, Fill};
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Style {
     pub fill: Option<Color>,
-    pub stroke: Option<(Color, f64)>,
+    pub stroke: Option<(Color, Stroke)>,
 }
 
 impl Style {
@@ -25,14 +25,19 @@ impl Style {
     pub fn stroked(color: Color, width: f64) -> Self {
         Self {
             fill: None,
-            stroke: Some((color, width)),
+            stroke: Some((color, Stroke::new(width))),
         }
     }
     pub fn filled_and_stroked(fill: Color, stroke: Color, width: f64) -> Self {
         Self {
             fill: Some(fill),
-            stroke: Some((stroke, width)),
+            stroke: Some((stroke, Stroke::new(width))),
         }
+    }
+
+    pub fn set_color(&mut self, color: Color) {
+        self.set_fill_color(color);
+        self.set_stroke_color(color);
     }
 
     pub fn set_fill_color(&mut self, color: Color) {
@@ -217,6 +222,178 @@ impl From<CircleSegment> for AnyShape {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ElemState {
+    pub position: Point,
+    pub rotation: f64,
+    pub scale: Vec2,
+    pub anchor: Vec2,
+}
+
+impl Default for ElemState {
+    fn default() -> Self {
+        Self {
+            position: Point::ZERO,
+            rotation: 0.0,
+            scale: Vec2::new(1.0, 1.0),
+            anchor: Vec2::new(0.5, 0.5),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Elem {
+    pub style: Style,
+    shape: AnyShape,
+    /// Bounding box of `shape` in local (untransformed) space.
+    local_bbox: Rect,
+    /// Cached `local_bbox` transformed into world space. Valid iff `!dirty`.
+    world_bbox: Rect,
+    state: ElemState,
+    transform: Affine,
+    /// Set whenever `state` or `shape` changes; cleared by `recompute`.
+    dirty: bool,
+}
+
+impl Default for Elem {
+    fn default() -> Self {
+        Elem::new(Rect::default().into(), Style::default(), None)
+    }
+}
+
+impl Elem {
+    pub fn new(shape: AnyShape, style: Style, state: Option<ElemState>) -> Self {
+        let local_bbox = shape.bounding_box();
+        Self {
+            style,
+            shape,
+            local_bbox,
+            world_bbox: local_bbox, // overwritten on first ensure_updated(), dirty = true
+            state: state.unwrap_or_default(),
+            transform: Affine::IDENTITY,
+            dirty: true,
+        }
+    }
+
+    pub fn builder() -> ElemBuilder {
+        ElemBuilder::new()
+    }
+
+    #[inline(always)]
+    pub fn state(&self) -> &ElemState {
+        &self.state
+    }
+
+    #[inline(always)]
+    pub fn state_mut(&mut self) -> &mut ElemState {
+        self.dirty = true;
+        &mut self.state
+    }
+
+    #[inline(always)]
+    pub fn shape(&self) -> AnyShape {
+        self.shape.clone()
+    }
+
+    #[inline(always)]
+    pub fn set_shape(&mut self, shape: AnyShape) {
+        self.local_bbox = shape.bounding_box();
+        self.shape = shape;
+        self.dirty = true;
+    }
+
+    #[inline(always)]
+    fn anchor_offset(&self) -> Vec2 {
+        Vec2::new(
+            self.local_bbox.x0 + self.local_bbox.width() * self.state.anchor.x,
+            self.local_bbox.y0 + self.local_bbox.height() * self.state.anchor.y,
+        )
+    }
+
+    // Cheap check instead of unreliable float equality with Affine::IDENTITY.
+    #[inline(always)]
+    fn is_identity(&self) -> bool {
+        self.state.rotation == 0.0
+            && self.state.scale == Vec2::new(1.0, 1.0)
+            && self.state.position == Point::ZERO
+    }
+
+    /// Recomputes `transform` and `world_bbox` together — they share the same
+    /// invalidation events, so keeping them in one place rules out desync
+    /// between the two caches.
+    fn recompute(&mut self) {
+        let anchor = self.anchor_offset();
+        self.transform = Affine::translate(self.state.position.to_vec2())
+            * Affine::rotate(self.state.rotation)
+            * Affine::scale_non_uniform(self.state.scale.x, self.state.scale.y)
+            * Affine::translate(-anchor);
+
+        self.world_bbox = if self.is_identity() {
+            self.local_bbox
+        } else {
+            let [a, b, c, d, e, f] = self.transform.as_coeffs();
+            let local = self.local_bbox;
+
+            let center_x = (local.x0 + local.x1) * 0.5;
+            let center_y = (local.y0 + local.y1) * 0.5;
+            let half_w = (local.x1 - local.x0) * 0.5;
+            let half_h = (local.y1 - local.y0) * 0.5;
+
+            let new_center_x = a * center_x + c * center_y + e;
+            let new_center_y = b * center_x + d * center_y + f;
+            let new_half_w = a.abs() * half_w + c.abs() * half_h;
+            let new_half_h = b.abs() * half_w + d.abs() * half_h;
+
+            Rect::new(
+                new_center_x - new_half_w,
+                new_center_y - new_half_h,
+                new_center_x + new_half_w,
+                new_center_y + new_half_h,
+            )
+        };
+
+        self.dirty = false;
+    }
+
+    #[inline(always)]
+    fn ensure_updated(&mut self) {
+        if self.dirty {
+            self.recompute();
+        }
+    }
+
+    #[inline]
+    pub fn transform(&mut self) -> Affine {
+        self.ensure_updated();
+        self.transform
+    }
+
+    /// O(1) when nothing changed since the last call — the world-space
+    /// bounding box is cached alongside the transform.
+    #[inline]
+    pub fn world_bounding_box(&mut self) -> Rect {
+        self.ensure_updated();
+        self.world_bbox
+    }
+
+    // Must be &mut to guarantee the cached transform reflects current state
+    // before it's read directly below — this was a real bug (stale transform bypass).
+    #[inline]
+    pub fn render(&mut self, scene: &mut Scene) {
+        self.render_with_base(scene, Affine::IDENTITY);
+    }
+
+    pub fn render_with_base(&mut self, scene: &mut Scene, base: Affine) {
+        let transform = base * self.transform(); // forces recompute if dirty
+        if let Some(color) = self.style.fill {
+            scene.fill(Fill::NonZero, transform, color, None, &self.shape);
+        }
+        if let Some((color, stroke)) = &self.style.stroke {
+            scene.stroke(stroke, transform, color, None, &self.shape);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ElemBuilder {
     el: Elem,
@@ -227,8 +404,8 @@ impl ElemBuilder {
         Self::default()
     }
 
-    pub fn with_shape(mut self, any_shape: impl Into<AnyShape>) -> Self {
-        self.el.shape = any_shape.into();
+    pub fn with_shape(mut self, shape: impl Into<AnyShape>) -> Self {
+        self.el.set_shape(shape.into());
         self
     }
 
@@ -277,150 +454,7 @@ impl ElemBuilder {
         self
     }
 
-    pub fn build(mut self) -> Elem {
-        self.el.bbox = self.el.shape.bounding_box();
+    pub fn build(self) -> Elem {
         self.el
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ElemState {
-    pub position: Point,
-    pub rotation: f64,
-    pub scale: Vec2,
-    pub anchor: Vec2,
-}
-
-impl Default for ElemState {
-    fn default() -> Self {
-        Self {
-            position: Point::ZERO,
-            rotation: 0.0,
-            scale: Vec2::new(1.0, 1.0),
-            anchor: Vec2::new(0.5, 0.5),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Elem {
-    pub style: Style,
-    shape: AnyShape,
-    bbox: Rect,
-    state: ElemState,
-    transform: Affine,
-    dirty: bool,
-}
-
-impl Default for Elem {
-    fn default() -> Self {
-        Elem::new(Rect::default().into(), Style::default(), None)
-    }
-}
-
-impl Elem {
-    pub fn new(shape: AnyShape, style: Style, state: Option<ElemState>) -> Self {
-        let bbox = shape.bounding_box();
-        Self {
-            style,
-            shape,
-            bbox,
-            state: state.unwrap_or_default(),
-            transform: Affine::IDENTITY,
-            dirty: true,
-        }
-    }
-
-    pub fn builder() -> ElemBuilder {
-        ElemBuilder::new()
-    }
-
-    #[inline(always)]
-    pub fn state(&self) -> &ElemState {
-        &self.state
-    }
-
-    #[inline(always)]
-    pub fn state_mut(&mut self) -> &mut ElemState {
-        self.dirty = true;
-        &mut self.state
-    }
-
-    #[inline(always)]
-    pub fn shape(&self) -> AnyShape {
-        self.shape.clone()
-    }
-
-    #[inline(always)]
-    pub fn set_shape(&mut self, shape: AnyShape) {
-        self.bbox = shape.bounding_box();
-        self.shape = shape;
-        self.dirty = true;
-    }
-
-    #[inline(always)]
-    fn anchor_offset(&self) -> Vec2 {
-        Vec2::new(
-            self.bbox.x0 + self.bbox.width() * self.state.anchor.x,
-            self.bbox.y0 + self.bbox.height() * self.state.anchor.y,
-        )
-    }
-
-    pub fn transform(&mut self) -> Affine {
-        if self.dirty {
-            let anchor = self.anchor_offset();
-            self.transform = Affine::translate(self.state.position.to_vec2())
-                * Affine::rotate(self.state.rotation)
-                * Affine::scale_non_uniform(self.state.scale.x, self.state.scale.y)
-                * Affine::translate(-anchor);
-            self.dirty = false;
-        }
-        self.transform
-    }
-
-    // Cheap check instead of unreliable float equality with IDENTITY.
-    #[inline(always)]
-    fn is_identity_state(&self) -> bool {
-        self.state.rotation == 0.0
-            && self.state.scale == Vec2::new(1.0, 1.0)
-            && self.state.position == Point::ZERO
-    }
-
-    #[inline]
-    pub fn world_bounding_box(&mut self) -> Rect {
-        let transform = self.transform();
-        let local = self.bbox;
-
-        if self.is_identity_state() {
-            return local;
-        }
-
-        let [a, b, c, d, e, f] = transform.as_coeffs();
-        let cx = (local.x0 + local.x1) * 0.5;
-        let cy = (local.y0 + local.y1) * 0.5;
-        let ex = (local.x1 - local.x0) * 0.5;
-        let ey = (local.y1 - local.y0) * 0.5;
-        let ncx = a * cx + c * cy + e;
-        let ncy = b * cx + d * cy + f;
-        let nex = a.abs() * ex + c.abs() * ey;
-        let ney = b.abs() * ex + d.abs() * ey;
-        Rect::new(ncx - nex, ncy - ney, ncx + nex, ncy + ney)
-    }
-
-    // Must be &mut to guarantee the cached transform reflects current state
-    // before it's read directly below — this was a real bug (stale transform bypass).
-    pub fn render(&mut self, scene: &mut Scene) {
-        self.render_with_base(scene, Affine::IDENTITY);
-    }
-
-    pub fn render_with_base(&mut self, scene: &mut Scene, base: Affine) {
-        let transform = base * self.transform(); // forces recompute if dirty
-        if let Some(color) = self.style.fill {
-            scene.fill(Fill::NonZero, transform, color, None, &self.shape);
-        }
-        if let Some((color, width)) = self.style.stroke {
-            let stroke = Stroke::new(width);
-            scene.stroke(&stroke, transform, color, None, &self.shape);
-        }
     }
 }

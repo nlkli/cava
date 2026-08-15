@@ -30,6 +30,8 @@ impl Default for CameraState {
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
     transform: Affine,
+    /// Axis-aligned world-space rect covering the viewport. Valid iff `!dirty`.
+    visible_world_rect: Rect,
     state: CameraState,
     dirty: bool,
 }
@@ -38,6 +40,7 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             transform: Affine::IDENTITY,
+            visible_world_rect: Rect::default(), // overwritten on first ensure_updated(), dirty = true
             state: CameraState::default(),
             dirty: true,
         }
@@ -64,22 +67,20 @@ impl Camera {
         &mut self.state
     }
 
-    pub fn transform(&mut self) -> Affine {
-        if self.dirty {
-            self.state.zoom = self.state.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-            self.transform = Affine::translate((self.state.viewport * 0.5).to_vec2())
-                * Affine::rotate(self.state.rotation)
-                * Affine::scale(self.state.zoom)
-                * Affine::translate(-self.state.position.to_vec2());
-            self.dirty = false;
-        }
-        self.transform
-    }
-
-    /// Axis-aligned world-space rect covering the viewport.
-    /// O(1): no matrix build, no inverse, no per-corner transform.
-    pub fn visible_world_rect(&self) -> Rect {
+    /// Recomputes `transform` and `visible_world_rect` together — both depend
+    /// on the same clamped zoom and rotation, so keeping them in one place
+    /// rules out desync (previously the zoom clamp only happened inside
+    /// `transform()`, so `visible_world_rect()` could read an unclamped zoom
+    /// if called first).
+    fn recompute(&mut self) {
+        self.state.zoom = self.state.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         let s = &self.state;
+
+        self.transform = Affine::translate((s.viewport * 0.5).to_vec2())
+            * Affine::rotate(s.rotation)
+            * Affine::scale(s.zoom)
+            * Affine::translate(-s.position.to_vec2());
+
         let inv_zoom = 1.0 / s.zoom.abs();
         let hw = s.viewport.width * 0.5 * inv_zoom;
         let hh = s.viewport.height * 0.5 * inv_zoom;
@@ -93,12 +94,35 @@ impl Camera {
             (cos_t.mul_add(hw, sin_t * hh), sin_t.mul_add(hw, cos_t * hh))
         };
 
-        Rect::new(
+        self.visible_world_rect = Rect::new(
             s.position.x - half_x,
             s.position.y - half_y,
             s.position.x + half_x,
             s.position.y + half_y,
-        )
+        );
+
+        self.dirty = false;
+    }
+
+    #[inline(always)]
+    fn ensure_updated(&mut self) {
+        if self.dirty {
+            self.recompute();
+        }
+    }
+
+    #[inline]
+    pub fn transform(&mut self) -> Affine {
+        self.ensure_updated();
+        self.transform
+    }
+
+    /// O(1) when nothing changed since the last call.
+    /// NOTE: now `&mut self` — the value is cached lazily, same as `transform()`.
+    #[inline]
+    pub fn visible_world_rect(&mut self) -> Rect {
+        self.ensure_updated();
+        self.visible_world_rect
     }
 
     pub fn pan_by_screen_delta(&mut self, screen_delta: Vec2) {
@@ -167,8 +191,11 @@ impl Camera {
     where
         I: IntoIterator<Item = &'a mut Elem>,
     {
-        let camera_transform = self.transform();
-        let visible = self.visible_world_rect();
+        // Single dirty-check for both cached values instead of two separate
+        // ensure_updated() calls through transform()+visible_world_rect().
+        self.ensure_updated();
+        let camera_transform = self.transform;
+        let visible = self.visible_world_rect;
 
         for el in els {
             let bbox = el.world_bounding_box();

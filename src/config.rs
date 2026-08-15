@@ -1,6 +1,6 @@
-use std::num::NonZero;
 use anyhow::{Context, Result};
 use configparser::ini::Ini;
+use std::num::NonZero;
 use vello::{AaConfig, AaSupport, RendererOptions, wgpu::PresentMode};
 
 macro_rules! parse_string {
@@ -12,22 +12,17 @@ macro_rules! parse_string {
 }
 
 macro_rules! parse_number {
-    ($ini:expr, $section:expr, $key:expr, $target:expr, $type:ty) => {
-        if let Some(v) = $ini
+    ($ini:expr, $section:expr, $key:expr, $target:expr) => {
+        $target = $ini
             .get($section, $key)
-            .and_then(|v| v.parse::<$type>().ok())
-        {
-            $target = v;
-        }
+            .and_then(|v| v.parse().ok())
+            .unwrap_or($target);
     };
 }
 
 macro_rules! parse_bool {
     ($ini:expr, $section:expr, $key:expr, $target:expr) => {
-        if let Some(v) = $ini
-            .getboolcoerce($section, $key)
-            .map_err(anyhow::Error::msg)?
-        {
+        if let Ok(Some(v)) = $ini.getboolcoerce($section, $key) {
             $target = v;
         }
     };
@@ -124,6 +119,7 @@ pub struct Window {
     pub active: bool,
     pub decorations: bool,
     pub transparent: bool,
+    pub blur: bool,
     pub maximized: bool,
     pub min_width: u32,
     pub min_height: u32,
@@ -179,6 +175,7 @@ impl Default for Window {
             active: true,
             decorations: true,
             transparent: false,
+            blur: false,
             maximized: false,
             min_width: 0,
             min_height: 0,
@@ -232,6 +229,7 @@ impl Window {
             .with_resizable(w.resizable)
             .with_decorations(w.decorations)
             .with_transparent(w.transparent)
+            .with_blur(w.blur)
             .with_maximized(w.maximized)
             .with_fullscreen(if w.fullscreen {
                 Some(winit::window::Fullscreen::Borderless(None))
@@ -305,6 +303,7 @@ impl Window {
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub path: Option<std::path::PathBuf>,
     pub render: Render,
     pub window: Window,
 }
@@ -312,6 +311,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            path: None,
             render: Render::default(),
             window: Window::default(),
         }
@@ -324,9 +324,10 @@ impl Config {
         default: Option<Config>,
     ) -> Result<Self> {
         let mut ini = Ini::new();
-        ini.load(path).map_err(|e| anyhow::anyhow!("{e}"))?;
+        ini.load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let mut config = default.unwrap_or_default();
+        config.path.replace(path.as_ref().to_path_buf());
 
         parse_string!(ini, "render", "present_mode", config.render.present_mode);
         parse_bool!(ini, "render", "use_cpu", config.render.use_cpu);
@@ -340,8 +341,7 @@ impl Config {
             ini,
             "render",
             "num_init_threads",
-            config.render.num_init_threads,
-            u32
+            config.render.num_init_threads
         );
         parse_string!(
             ini,
@@ -351,18 +351,19 @@ impl Config {
         );
 
         parse_string!(ini, "window", "title", config.window.title);
-        parse_number!(ini, "window", "width", config.window.width, u32);
-        parse_number!(ini, "window", "height", config.window.height, u32);
+        parse_number!(ini, "window", "width", config.window.width);
+        parse_number!(ini, "window", "height", config.window.height);
         parse_bool!(ini, "window", "fullscreen", config.window.fullscreen);
         parse_bool!(ini, "window", "resizable", config.window.resizable);
         parse_bool!(ini, "window", "active", config.window.active);
         parse_bool!(ini, "window", "decorations", config.window.decorations);
         parse_bool!(ini, "window", "transparent", config.window.transparent);
+        parse_bool!(ini, "window", "blur", config.window.blur);
         parse_bool!(ini, "window", "maximized", config.window.maximized);
-        parse_number!(ini, "window", "min_width", config.window.min_width, u32);
-        parse_number!(ini, "window", "min_height", config.window.min_height, u32);
-        parse_number!(ini, "window", "max_width", config.window.max_width, u32);
-        parse_number!(ini, "window", "max_height", config.window.max_height, u32);
+        parse_number!(ini, "window", "min_width", config.window.min_width);
+        parse_number!(ini, "window", "min_height", config.window.min_height);
+        parse_number!(ini, "window", "max_width", config.window.max_width);
+        parse_number!(ini, "window", "max_height", config.window.max_height);
 
         parse_bool!(
             ini,
