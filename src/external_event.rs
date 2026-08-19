@@ -8,12 +8,12 @@ use winit::event_loop::EventLoopProxy;
 use crate::config::Config;
 
 #[derive(Debug)]
-pub struct EventProducerHandle {
+pub struct ExternalEventProducerHandle {
     stop_flag: Arc<AtomicBool>,
     jh: Option<std::thread::JoinHandle<()>>,
 }
 
-impl EventProducerHandle {
+impl ExternalEventProducerHandle {
     pub fn stop(&mut self) -> Option<std::thread::JoinHandle<()>> {
         self.stop_flag.store(true, Ordering::Relaxed);
         self.jh.take()
@@ -27,7 +27,7 @@ impl EventProducerHandle {
     }
 }
 
-impl Drop for EventProducerHandle {
+impl Drop for ExternalEventProducerHandle {
     fn drop(&mut self) {
         let _ = self.stop_and_join();
     }
@@ -36,14 +36,13 @@ impl Drop for EventProducerHandle {
 pub fn spawn_external_event_producer(
     proxy: EventLoopProxy<ExternalEvent>,
     config_path: Option<PathBuf>,
-) -> EventProducerHandle {
+) -> ExternalEventProducerHandle {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_thread = stop_flag.clone();
 
-    let watcher_proxy = proxy.clone();
-    let mut last_event = Instant::now() - Duration::from_secs(10);
-
     let watcher_result = {
+        let proxy = proxy.clone();
+        let mut last_event = Instant::now() - Duration::from_secs(10);
         let config_path = config_path
             .clone()
             .and_then(|p| std::fs::canonicalize(&p).ok());
@@ -67,7 +66,7 @@ pub fn spawn_external_event_producer(
 
                 if is_config_path {
                     if let Ok(config) = Config::from_ini_file(&p, None) {
-                        let _ = watcher_proxy.send_event(ExternalEvent::ChangeConfig(config));
+                        let _ = proxy.send_event(ExternalEvent::ChangeConfig(config));
                     }
                 }
             }
@@ -99,7 +98,7 @@ pub fn spawn_external_event_producer(
         }
     });
 
-    EventProducerHandle {
+    ExternalEventProducerHandle {
         stop_flag,
         jh: Some(jh),
     }

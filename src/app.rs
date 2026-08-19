@@ -14,7 +14,9 @@ use crate::cli;
 use crate::config::Config;
 use crate::elem::{Elem, Style as EStyle};
 
-use super::{EventProducerHandle, ExternalEvent, spawn_external_event_producer};
+use crate::external_event::{
+    ExternalEvent, ExternalEventProducerHandle, spawn_external_event_producer,
+};
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowExtMacOS as _;
@@ -26,8 +28,28 @@ enum RenderState {
         window: Arc<WW::Window>,
         renderer: V::Renderer,
         antialiasing_method: V::AaConfig,
-        _eproducer: EventProducerHandle,
+        _eproducer: ExternalEventProducerHandle,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum Mode {
+    #[default]
+    Hand,
+    Selection,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MouseState {
+    // [0] left; [1] right
+    pressed: [bool; 2],
+    ptime: [std::time::Instant; 2],
+}
+
+impl Default for MouseState {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 struct AppState {
@@ -40,6 +62,10 @@ struct AppState {
     camera_idx: usize,
 
     elements: Vec<Elem>,
+
+    mode: Mode,
+
+    mouse: MouseState,
 
     config: Config,
 }
@@ -110,6 +136,18 @@ impl winit::application::ApplicationHandler<ExternalEvent> for AppState {
                     self.camera[self.camera_idx].state_mut().viewport =
                         K::Size::new(size.width as f64, size.height as f64);
                     window.request_redraw();
+                }
+            }
+            WE::WindowEvent::MouseInput { state, button, .. } => {
+                let mut nbt = match button {
+                    WE::MouseButton::Left => 1,
+                    WE::MouseButton::Right => 2,
+                    _ => 0,
+                };
+                if nbt > 0 {
+                    nbt -= 1;
+                    self.mouse.pressed[nbt] = state == WE::ElementState::Pressed;
+                    self.mouse.ptime[nbt] = std::time::Instant::now();
                 }
             }
             WE::WindowEvent::RedrawRequested => {
@@ -234,6 +272,7 @@ pub fn run() -> Result<()> {
         rctx: V::util::RenderContext::new(),
         rstate: RenderState::Suspended(None),
         scene: V::Scene::new(),
+        mode: Mode::default(),
         camera: vec![
             Camera::builder()
                 .with_viewport_size(
@@ -244,6 +283,7 @@ pub fn run() -> Result<()> {
         ],
         camera_idx: 0,
         elements: Vec::new(),
+        mouse: MouseState::default(),
         config: args.config,
     };
 

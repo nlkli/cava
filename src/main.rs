@@ -3,6 +3,7 @@ mod camera;
 mod cli;
 mod config;
 mod elem;
+mod external_event;
 
 fn main() {
     app::run().unwrap();
