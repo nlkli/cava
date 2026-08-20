@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-vello = "0.9"
+# https://docs.rs/vello/latest/vello/index.html
+vello = "0.10"
 winit = "0.30.13"
-pollster = "0.4"
+
 anyhow = "1"
-configparser = "3.2"
 notify = "8.1"
+configparser = "3.2"
+
+# ?
+pollster = "0.4"
 # slotmap = "1.1"

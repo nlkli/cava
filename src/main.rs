@@ -3,6 +3,7 @@ mod camera;
 mod cli;
 mod config;
 mod elem;
+mod elem_v2;
 mod external_event;
 
 fn main() {

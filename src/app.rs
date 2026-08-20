@@ -32,7 +32,7 @@ enum RenderState {
     },
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 enum Mode {
     #[default]
     Hand,
@@ -41,9 +41,14 @@ enum Mode {
 
 #[derive(Debug, Clone, Copy)]
 struct MouseState {
+    cursor_pos: K::Point,
+    cursor_delta: K::Vec2,
     // [0] left; [1] right
-    pressed: [bool; 2],
-    ptime: [std::time::Instant; 2],
+    pressed: [bool; 3],
+    pressed_pos: [K::Point; 3],
+    ptime: [std::time::Instant; 3],
+    ptime_prev: [std::time::Instant; 3],
+    pressed_prev: [bool; 3],
 }
 
 impl Default for MouseState {
@@ -138,22 +143,54 @@ impl winit::application::ApplicationHandler<ExternalEvent> for AppState {
                     window.request_redraw();
                 }
             }
+            WE::WindowEvent::KeyboardInput {
+                event,
+                // is_synthetic,
+                ..
+            } => {
+                println!("- {:?}", event);
+            }
             WE::WindowEvent::MouseInput { state, button, .. } => {
                 let mut nbt = match button {
                     WE::MouseButton::Left => 1,
                     WE::MouseButton::Right => 2,
+                    WE::MouseButton::Middle => 3,
                     _ => 0,
                 };
                 if nbt > 0 {
                     nbt -= 1;
+                    self.mouse.pressed_prev[nbt] = self.mouse.pressed[nbt];
                     self.mouse.pressed[nbt] = state == WE::ElementState::Pressed;
+                    self.mouse.pressed_pos[nbt] = self.mouse.cursor_pos;
+                    self.mouse.ptime_prev[nbt] = self.mouse.ptime[nbt];
                     self.mouse.ptime[nbt] = std::time::Instant::now();
+                }
+            }
+            WE::WindowEvent::CursorMoved { position, .. } => {
+                let new_cursor_pos = K::Point::new(position.x, position.y);
+                self.mouse.cursor_delta = self.mouse.cursor_pos - new_cursor_pos;
+                self.mouse.cursor_pos = new_cursor_pos;
+
+                match self.mode {
+                    Mode::Hand => {
+                        if self.mouse.pressed[0] || self.mouse.pressed[2] {
+                            self.camera[self.camera_idx]
+                                .pan_by_screen_delta(-self.mouse.cursor_delta);
+
+                            window.request_redraw();
+                        }
+                    }
+                    Mode::Selection => todo!(),
+                    _ => {}
                 }
             }
             WE::WindowEvent::RedrawRequested => {
                 self.scene.reset();
 
                 self.camera[self.camera_idx].render(&mut self.scene, &mut self.elements);
+
+                // self.scene.draw_glyphs(&vello::peniko::FontData{});
+                // self.scene.try_into
 
                 let width = surface.config.width;
                 let height = surface.config.height;
