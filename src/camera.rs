@@ -140,6 +140,7 @@ impl Camera {
         };
 
         let s = self.state_mut();
+
         s.position.x -= dx;
         s.position.y -= dy;
     }

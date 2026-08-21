@@ -3,8 +3,12 @@ mod camera;
 mod cli;
 mod config;
 mod elem;
-mod elem_v2;
+mod document;
+mod elements;
 mod external_event;
+mod element;
+mod any_shape;
+mod style;
 
 fn main() {
     app::run().unwrap();

@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use configparser::ini::Ini;
 use std::num::NonZero;
 use vello::{AaConfig, AaSupport, RendererOptions, wgpu::PresentMode};
+use winit::window::WindowLevel;
 
 macro_rules! parse_string {
     ($ini:expr, $section:expr, $key:expr, $target:expr) => {
@@ -117,6 +118,8 @@ pub struct Window {
     pub fullscreen: bool,
     pub resizable: bool,
     pub active: bool,
+    pub visible: bool,
+    pub level: String,
     pub decorations: bool,
     pub transparent: bool,
     pub blur: bool,
@@ -173,6 +176,8 @@ impl Default for Window {
             fullscreen: false,
             resizable: true,
             active: true,
+            visible: true,
+            level: "normal".into(),
             decorations: true,
             transparent: false,
             blur: false,
@@ -227,6 +232,7 @@ impl Window {
             .with_title(&w.title)
             .with_inner_size(winit::dpi::LogicalSize::new(w.width, w.height))
             .with_resizable(w.resizable)
+            .with_visible(w.visible)
             .with_decorations(w.decorations)
             .with_transparent(w.transparent)
             .with_blur(w.blur)
@@ -265,6 +271,15 @@ impl Window {
                 max_inner_size.height = w.max_height.max(2);
             }
             attr = attr.with_max_inner_size(max_inner_size);
+        }
+
+        if !w.level.is_empty() {
+            match w.level.to_lowercase().trim() {
+                "normal" => attr = attr.with_window_level(WindowLevel::Normal),
+                "alwaysonbottom" => attr = attr.with_window_level(WindowLevel::AlwaysOnBottom),
+                "alwaysontop" => attr = attr.with_window_level(WindowLevel::AlwaysOnTop),
+                _ => {}
+            }
         }
 
         #[cfg(target_os = "macos")]
@@ -356,6 +371,7 @@ impl Config {
         parse_bool!(ini, "window", "fullscreen", config.window.fullscreen);
         parse_bool!(ini, "window", "resizable", config.window.resizable);
         parse_bool!(ini, "window", "active", config.window.active);
+        parse_bool!(ini, "window", "visible", config.window.visible);
         parse_bool!(ini, "window", "decorations", config.window.decorations);
         parse_bool!(ini, "window", "transparent", config.window.transparent);
         parse_bool!(ini, "window", "blur", config.window.blur);
